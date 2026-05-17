@@ -1,0 +1,55 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta http-equiv="X-UA-Compatible" content="ie=edge" />
+<title>Markmap</title>
+<style>
+* {
+  margin: 0;
+  padding: 0;
+}
+html {
+  font-family: ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji',
+    'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+}
+#mindmap {
+  display: block;
+  width: 100vw;
+  height: 100vh;
+}
+.markmap-dark {
+  background: #27272a;
+  color: white;
+}
+</style>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/markmap-toolbar@0.18.12/dist/style.css">
+</head>
+<body>
+<svg id="mindmap"></svg>
+<script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script><script src="https://cdn.jsdelivr.net/npm/markmap-view@0.18.12/dist/browser/index.js"></script><script src="https://cdn.jsdelivr.net/npm/markmap-toolbar@0.18.12/dist/index.js"></script><script>(r => {
+              setTimeout(r);
+            })(function renderToolbar() {
+  const {
+    markmap,
+    mm
+  } = window;
+  const {
+    el
+  } = markmap.Toolbar.create(mm);
+  el.setAttribute('style', 'position:absolute;bottom:20px;right:20px');
+  document.body.append(el);
+})</script><script>((getMarkmap, getOptions, root2, jsonOptions) => {
+              const markmap = getMarkmap();
+              window.mm = markmap.Markmap.create(
+                "svg#mindmap",
+                (getOptions || markmap.deriveOptions)(jsonOptions),
+                root2
+              );
+              if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
+                document.documentElement.classList.add("markmap-dark");
+              }
+            })(() => window.markmap,null,{"content":"CPU Scheduling","children":[{"content":"Basic Concepts","children":[{"content":"Multiprogramming Objective","children":[{"content":"Maximize CPU Utilization","children":[],"payload":{"tag":"li","lines":"4,5"}}],"payload":{"tag":"h3","lines":"3,4"}},{"content":"CPU-I/O Burst Cycle","children":[{"content":"Alternating Cycles","children":[],"payload":{"tag":"li","lines":"6,7"}},{"content":"Process Termination","children":[],"payload":{"tag":"li","lines":"7,8"}}],"payload":{"tag":"h3","lines":"5,6"}},{"content":"Burst Distribution","children":[{"content":"Exponential Curve","children":[],"payload":{"tag":"li","lines":"9,10"}},{"content":"I/O-bound (Many Short Bursts)","children":[],"payload":{"tag":"li","lines":"10,11"}},{"content":"CPU-bound (Few Long Bursts)","children":[],"payload":{"tag":"li","lines":"11,13"}}],"payload":{"tag":"h3","lines":"8,9"}}],"payload":{"tag":"h2","lines":"2,3"}},{"content":"Scheduling Components","children":[{"content":"CPU Scheduler","children":[{"content":"Short-term Selection","children":[],"payload":{"tag":"li","lines":"15,16"}},{"content":"Ready Queue Management","children":[],"payload":{"tag":"li","lines":"16,17"}},{"content":"Nonpreemptive vs. Preemptive","children":[],"payload":{"tag":"li","lines":"17,18"}}],"payload":{"tag":"h3","lines":"14,15"}},{"content":"Dispatcher","children":[{"content":"Context Switching","children":[],"payload":{"tag":"li","lines":"19,20"}},{"content":"User Mode Switching","children":[],"payload":{"tag":"li","lines":"20,21"}},{"content":"Dispatch Latency (Overhead)","children":[],"payload":{"tag":"li","lines":"21,23"}}],"payload":{"tag":"h3","lines":"18,19"}}],"payload":{"tag":"h2","lines":"13,14"}},{"content":"Scheduling Criteria","children":[{"content":"Maximize CPU Utilization","children":[],"payload":{"tag":"li","lines":"24,25"}},{"content":"Maximize Throughput","children":[],"payload":{"tag":"li","lines":"25,26"}},{"content":"Minimize Turnaround Time","children":[],"payload":{"tag":"li","lines":"26,27"}},{"content":"Minimize Waiting Time","children":[],"payload":{"tag":"li","lines":"27,28"}},{"content":"Minimize Response Time","children":[],"payload":{"tag":"li","lines":"28,30"}}],"payload":{"tag":"h2","lines":"23,24"}},{"content":"Scheduling Algorithms","children":[{"content":"FCFS (First-Come, First-Served)","children":[{"content":"FIFO implementation","children":[],"payload":{"tag":"li","lines":"32,33"}},{"content":"Convoy Effect","children":[],"payload":{"tag":"li","lines":"33,34"}},{"content":"Nonpreemptive","children":[],"payload":{"tag":"li","lines":"34,35"}}],"payload":{"tag":"h3","lines":"31,32"}},{"content":"SJF (Shortest-Job-First)","children":[{"content":"Optimal Average Waiting Time","children":[],"payload":{"tag":"li","lines":"36,37"}},{"content":"Exponential Averaging Prediction","children":[],"payload":{"tag":"li","lines":"37,38"}},{"content":"SRTF (Shortest-Remaining-Time-First)","children":[],"payload":{"tag":"li","lines":"38,39"}}],"payload":{"tag":"h3","lines":"35,36"}},{"content":"Priority Scheduling","children":[{"content":"Priority Numbers","children":[],"payload":{"tag":"li","lines":"40,41"}},{"content":"Indefinite Blocking (Starvation)","children":[],"payload":{"tag":"li","lines":"41,42"}},{"content":"Aging Solution","children":[],"payload":{"tag":"li","lines":"42,43"}}],"payload":{"tag":"h3","lines":"39,40"}},{"content":"Round-Robin (RR)","children":[{"content":"Time Quantum/Slice","children":[],"payload":{"tag":"li","lines":"44,45"}},{"content":"Preemptive","children":[],"payload":{"tag":"li","lines":"45,46"}},{"content":"Context Switch Overhead","children":[],"payload":{"tag":"li","lines":"46,47"}}],"payload":{"tag":"h3","lines":"43,44"}},{"content":"Multilevel Queue","children":[{"content":"Queue Partitioning","children":[],"payload":{"tag":"li","lines":"48,49"}},{"content":"Permanent Assignment","children":[],"payload":{"tag":"li","lines":"49,50"}},{"content":"Fixed Priority Scheduling","children":[],"payload":{"tag":"li","lines":"50,51"}}],"payload":{"tag":"h3","lines":"47,48"}},{"content":"Multilevel Feedback Queue","children":[{"content":"Dynamic Queue Movement","children":[],"payload":{"tag":"li","lines":"52,53"}},{"content":"Behavior-based Separation","children":[],"payload":{"tag":"li","lines":"53,54"}},{"content":"Most General Algorithm","children":[],"payload":{"tag":"li","lines":"54,56"}}],"payload":{"tag":"h3","lines":"51,52"}}],"payload":{"tag":"h2","lines":"30,31"}},{"content":"Thread Scheduling","children":[],"payload":{"tag":"h2","lines":"56,57"}},{"content":"Multi-Processor Scheduling","children":[],"payload":{"tag":"h2","lines":"58,59"}}],"payload":{"tag":"h1","lines":"0,1"}},{})</script>
+</body>
+</html>
