@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TCP Congestion Control - Interactive FSM</title>
+    <style>
+        /* Notion-like base styling */
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #ffffff;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            overflow: hidden; /* Prevent scrollbars */
+        }
+
+        /* Top Control Bar */
+        .controls {
+            width: 100%;
+            padding: 15px 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 15px;
+            background: #f7f7f5;
+            border-bottom: 1px solid #e9e9e7;
+            z-index: 1000;
+        }
+
+        button {
+            padding: 8px 16px;
+            font-size: 14px;
+            font-weight: 600;
+            color: #37352f;
+            background-color: #ffffff;
+            border: 1px solid #e9e9e7;
+            border-radius: 6px;
+            cursor: pointer;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+            transition: all 0.2s;
+        }
+
+        button:hover { background-color: #f1f1ef; }
+        button.primary { background-color: #2383e2; color: white; border: none; }
+        button.primary:hover { background-color: #1a6bba; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        #step-counter { font-size: 14px; font-weight: 500; color: #787774; min-width: 80px; text-align: center; }
+
+        /* The scaling wrapper */
+        #wrapper {
+            width: 100%;
+            max-width: 1200px;
+            position: relative;
+            display: flex;
+            justify-content: center;
+        }
+
+        /* Fixed Canvas */
+        #fsm-canvas {
+            width: 1200px;
+            height: 800px;
+            position: absolute;
+            top: 20px;
+            transform-origin: top center;
+        }
+
+        /* State Circles */
+        .state {
+            position: absolute;
+            width: 150px;
+            height: 150px;
+            border-radius: 50%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            font-weight: 700;
+            font-size: 20px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+            opacity: 0.2;
+            transform: translate(-50%, -50%) scale(0.9);
+            transition: all 0.5s ease;
+            z-index: 10;
+        }
+
+        /* Semantic Colors */
+        #ss-state { top: 250px; left: 300px; background: #e0f2fe; border: 4px solid #0284c7; color: #0c4a6e; }
+        #ca-state { top: 250px; left: 900px; background: #dcfce7; border: 4px solid #16a34a; color: #14532d; }
+        #fr-state { top: 600px; left: 600px; background: #ffedd5; border: 4px solid #ea580c; color: #7c2d12; }
+
+        /* Highlight classes */
+        .state.active { opacity: 1; transform: translate(-50%, -50%) scale(1.05); box-shadow: 0 8px 24px rgba(0,0,0,0.15); }
+        .state.visible { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+
+        /* Text Boxes for Triggers/Actions */
+        .fsm-text {
+            position: absolute;
+            background: #ffffff;
+            padding: 10px 14px;
+            border-radius: 6px;
+            border: 1px solid #e9e9e7;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+            opacity: 0;
+            transform: translate(-50%, -50%);
+            transition: opacity 0.4s ease;
+            z-index: 20;
+            text-align: left;
+            font-size: 14px;
+            line-height: 1.5;
+            pointer-events: none;
+            width: max-content;
+        }
+
+        .fsm-text.visible { opacity: 1; }
+        .fsm-text.highlight { border: 2px solid #2383e2; box-shadow: 0 4px 12px rgba(35,131,226,0.2); }
+
+        .trigger { font-weight: bold; color: #37352f; }
+        .action { color: #2383e2; font-family: monospace; font-size: 15px;}
+        .alert { color: #d93025; font-style: italic; font-weight: 500;}
+
+        /* Text Coordinates */
+        #txt-init { top: 200px; left: 80px; }
+        #txt-ss-loop { top: 60px; left: 300px; }
+        #txt-ss-ca { top: 200px; left: 600px; }
+        #txt-ca-loop { top: 60px; left: 900px; }
+        #txt-loss-dup { top: 430px; left: 750px; }
+        #txt-fr-loop { top: 760px; left: 600px; }
+        #txt-fr-ca { top: 430px; left: 900px; }
+        #txt-loss-timeout { top: 430px; left: 250px; text-align: right;}
+
+        /* SVG Arrows */
+        svg {
+            position: absolute;
+            top: 0; left: 0;
+            width: 1200px; height: 800px;
+            z-index: 5;
+            pointer-events: none;
+        }
+
+        path {
+            fill: none;
+            stroke: #d3d3d3;
+            stroke-width: 3;
+            stroke-dasharray: 1000;
+            stroke-dashoffset: 1000;
+            transition: stroke-dashoffset 0.8s ease-in-out, stroke 0.4s ease;
+            marker-end: url(#arrow-gray);
+        }
+
+        path.visible { stroke-dashoffset: 0; }
+        path.highlight { stroke: #2383e2; stroke-width: 4; marker-end: url(#arrow-blue); z-index: 6;}
+        path.danger { stroke: #d93025; stroke-width: 4; marker-end: url(#arrow-red); }
+
+        .dashed { stroke-dasharray: 8, 8 !important; }
+
+        /* Explanation Panel (Bottom) */
+        #explanation-panel {
+            position: fixed;
+            bottom: 20px;
+            width: 90%;
+            max-width: 800px;
+            background: #ffffff;
+            border: 1px solid #e9e9e7;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+            text-align: center;
+            z-index: 2000;
+            transition: all 0.3s ease;
+        }
+
+        #exp-title { font-size: 18px; font-weight: 700; color: #37352f; margin-bottom: 8px; }
+        #exp-body { font-size: 15px; color: #787774; line-height: 1.5; }
+
+    </style>
+</head>
+<body>
+
+    <!-- Top Controls -->
+    <div class="controls">
+        <button id="prev-btn" onclick="prevStep()" disabled>Previous</button>
+        <span id="step-counter">Step 0 / 8</span>
+        <button id="next-btn" class="primary" onclick="nextStep()">Start</button>
+    </div>
+
+    <!-- FSM Canvas -->
+    <div id="wrapper">
+        <div id="fsm-canvas">
+            <!-- Arrows -->
+            <svg>
+                <defs>
+                    <marker id="arrow-gray" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#d3d3d3" /></marker>
+                    <marker id="arrow-blue" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#2383e2" /></marker>
+                    <marker id="arrow-red" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#d93025" /></marker>
+                </defs>
+                
+                <path id="arr-init" class="dashed" d="M 50,250 L 210,250" />
+                <path id="arr-ss-loop" d="M 260,180 C 150,0 450,0 340,180" />
+                <path id="arr-ss-ca" d="M 385,250 L 815,250" />
+                <path id="arr-ca-loop" d="M 860,180 C 750,0 1050,0 940,180" />
+                
+                <path id="arr-ca-fr" d="M 850,310 Q 750,450 650,540" />
+                <path id="arr-ss-fr" d="M 350,310 Q 450,450 550,540" />
+                <path id="arr-fr-loop" d="M 640,660 C 750,850 450,850 560,660" />
+                
+                <path id="arr-fr-ca" d="M 660,570 Q 900,450 930,330" />
+                
+                <!-- Timeout Arrows -->
+                <path id="arr-ca-ss" d="M 850,320 C 600,500 500,400 360,320" />
+                <path id="arr-fr-ss" d="M 540,570 Q 300,450 300,330" />
+            </svg>
+
+            <!-- States -->
+            <div id="ss-state" class="state">Slow<br>Start</div>
+            <div id="ca-state" class="state">Congestion<br>Avoidance</div>
+            <div id="fr-state" class="state">Fast<br>Recovery</div>
+
+            <!-- Texts -->
+            <div id="txt-init" class="fsm-text">
+                <span class="trigger">Connection Begins</span><br>
+                <span class="action">cwnd = 1 MSS<br>ssthresh = 64 KB</span>
+            </div>
+
+            <div id="txt-ss-loop" class="fsm-text">
+                <span class="trigger">Received new ACK</span><br>
+                <span class="action">cwnd = cwnd + 1 MSS</span><br>
+                <span style="color: #787774; font-size: 12px;">(Window doubles every RTT)</span>
+            </div>
+
+            <div id="txt-ss-ca" class="fsm-text">
+                <span class="trigger">cwnd ≥ ssthresh</span><br>
+                <span style="color: #787774; font-size: 12px;">Stop exponential growth</span>
+            </div>
+
+            <div id="txt-ca-loop" class="fsm-text">
+                <span class="trigger">Received new ACK</span><br>
+                <span class="action">cwnd = cwnd + (1/cwnd)</span><br>
+                <span style="color: #787774; font-size: 12px;">(Window grows by 1 MSS per RTT)</span>
+            </div>
+
+            <div id="txt-loss-dup" class="fsm-text">
+                <span class="alert">3 Duplicate ACKs Received!</span><br>
+                <span class="action">ssthresh = cwnd / 2<br>cwnd = ssthresh + 3</span><br>
+                <span class="alert">Retransmit missing packet</span>
+            </div>
+
+            <div id="txt-fr-loop" class="fsm-text">
+                <span class="trigger">Another Dup ACK arrives</span><br>
+                <span class="action">cwnd = cwnd + 1 MSS</span><br>
+                <span style="color: #787774; font-size: 12px;">(Keep inflating window to send new data)</span>
+            </div>
+
+            <div id="txt-fr-ca" class="fsm-text">
+                <span class="trigger">New ACK finally arrives</span><br>
+                <span class="action">cwnd = ssthresh</span><br>
+                <span style="color: #787774; font-size: 12px;">(Deflate window, go back to normal)</span>
+            </div>
+
+            <div id="txt-loss-timeout" class="fsm-text">
+                <span class="alert">TIMEOUT (Network Silence)</span><br>
+                <span class="action">ssthresh = cwnd / 2<br>cwnd = 1 MSS</span><br>
+                <span class="alert">Panic! Start all over again.</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Explanation Panel -->
+    <div id="explanation-panel">
+        <div id="exp-title">Welcome to TCP Congestion Control</div>
+        <div id="exp-body">Click "Start" to step through the narrative of a TCP connection. We will see how it probes for speed, reacts to mild packet loss, and handles severe network congestion.</div>
+    </div>
+
+    <script>
+        // Responsive Scaling Logic
+        function scaleCanvas() {
+            const wrapper = document.getElementById('wrapper');
+            const canvas = document.getElementById('fsm-canvas');
+            let scale = Math.min(wrapper.clientWidth / 1200, 1); // Max scale 1
+            canvas.style.transform = `scale(${scale})`;
+            wrapper.style.height = `${800 * scale}px`;
+        }
+        window.addEventListener('resize', scaleCanvas);
+        window.addEventListener('load', scaleCanvas);
+
+        // State Machine Data (The Narrative Steps)
+        const steps = [
+            { // 0: Init
+                title: "Welcome to TCP Congestion Control",
+                desc: "Click 'Next' to walk through the narrative of a TCP connection, from initial startup to handling severe packet loss.",
+                activeNodes: [], activePaths: [], activeTexts: [], highlightPath: null
+            },
+            { // 1: Connection Start
+                title: "1. The Connection Begins",
+                desc: "When TCP first connects, it knows nothing about the network speed. It plays it safe by starting in the <b>Slow Start</b> state with a window size of exactly 1 packet (MSS).",
+                activeNodes: ['ss-state'], activePaths: ['arr-init'], activeTexts: ['txt-init'], highlightPath: 'arr-init'
+            },
+            { // 2: Slow Start Loop
+                title: "2. Exponential Growth (Probing)",
+                desc: "For every successful ACK received, TCP adds 1 to the window. This causes the sending rate to <b>double</b> every Round Trip Time (RTT). It grows exponentially fast to find the network's limit.",
+                activeNodes: ['ss-state'], activePaths: ['arr-init', 'arr-ss-loop'], activeTexts: ['txt-init', 'txt-ss-loop'], highlightPath: 'arr-ss-loop'
+            },
+            { // 3: Transition to CA
+                title: "3. Reaching the Threshold",
+                desc: "TCP can't double forever. Once the window size reaches the safe threshold limit (<code>ssthresh</code>), it stops exponential growth and gracefully transitions into <b>Congestion Avoidance</b>.",
+                activeNodes: ['ss-state', 'ca-state'], activePaths: ['arr-init', 'arr-ss-loop', 'arr-ss-ca'], activeTexts: ['txt-init', 'txt-ss-loop', 'txt-ss-ca'], highlightPath: 'arr-ss-ca'
+            },
+            { // 4: CA Loop
+                title: "4. Additive Increase (Smooth Sailing)",
+                desc: "Now in Congestion Avoidance, TCP grows very cautiously. It only adds <b>1 MSS to the window per RTT</b>. This creates the slow, upward linear climb seen on TCP graphs.",
+                activeNodes: ['ss-state', 'ca-state'], activePaths: ['arr-ss-ca', 'arr-ca-loop'], activeTexts: ['txt-ss-ca', 'txt-ca-loop'], highlightPath: 'arr-ca-loop'
+            },
+            { // 5: Fast Recovery Entry
+                title: "5. Mild Congestion! (3 Duplicate ACKs)",
+                desc: "Uh oh! A single packet was dropped. The receiver notices a gap and shoots back 3 Duplicate ACKs. TCP doesn't panic. It cuts its threshold in half, enters <b>Fast Recovery</b>, and immediately retransmits the lost packet.",
+                activeNodes: ['ss-state', 'ca-state', 'fr-state'], activePaths: ['arr-ca-loop', 'arr-ca-fr', 'arr-ss-fr'], activeTexts: ['txt-ca-loop', 'txt-loss-dup'], highlightPath: 'arr-ca-fr', isDanger: true
+            },
+            { // 6: Fast Recovery Loop
+                title: "6. Inflating the Window",
+                desc: "While waiting for the retransmitted packet to arrive, duplicate ACKs might keep rolling in. For each one, TCP temporarily inflates its window by 1 so it can keep sending new data while recovering.",
+                activeNodes: ['ss-state', 'ca-state', 'fr-state'], activePaths: ['arr-ca-fr', 'arr-fr-loop'], activeTexts: ['txt-loss-dup', 'txt-fr-loop'], highlightPath: 'arr-fr-loop'
+            },
+            { // 7: Back to CA
+                title: "7. Recovery Successful",
+                desc: "A fresh, new ACK finally arrives! The lost packet was successfully recovered. TCP deflates the window back to normal and returns to the cautious <b>Congestion Avoidance</b> phase.",
+                activeNodes: ['ss-state', 'ca-state', 'fr-state'], activePaths: ['arr-fr-loop', 'arr-fr-ca', 'arr-ca-loop'], activeTexts: ['txt-fr-loop', 'txt-fr-ca', 'txt-ca-loop'], highlightPath: 'arr-fr-ca'
+            },
+            { // 8: Timeout
+                title: "8. Severe Congestion! (Timeout)",
+                desc: "Sometimes, the network is so congested that ACKs stop arriving completely. The timer expires. This is a severe panic event! TCP drops its window all the way down to 1 MSS and is forced back to <b>Slow Start</b>.",
+                activeNodes: ['ss-state', 'ca-state', 'fr-state'], activePaths: ['arr-ca-ss', 'arr-fr-ss'], activeTexts: ['txt-loss-timeout'], highlightPath: 'arr-ca-ss', isDanger: true
+            }
+        ];
+
+        let currentStep = 0;
+
+        function updateUI() {
+            const data = steps[currentStep];
+
+            // 1. Update Explanations
+            document.getElementById('exp-title').innerHTML = data.title;
+            document.getElementById('exp-body').innerHTML = data.desc;
+            document.getElementById('step-counter').innerText = `Step ${currentStep} / 8`;
+
+            // 2. Buttons
+            document.getElementById('prev-btn').disabled = (currentStep === 0);
+            const nextBtn = document.getElementById('next-btn');
+            if (currentStep === steps.length - 1) {
+                nextBtn.innerText = "Reset";
+                nextBtn.style.backgroundColor = "#d93025";
+            } else {
+                nextBtn.innerText = currentStep === 0 ? "Start" : "Next Step";
+                nextBtn.style.backgroundColor = "#2383e2";
+            }
+
+            // 3. Reset all classes
+            document.querySelectorAll('.state').forEach(el => { el.classList.remove('visible', 'active'); });
+            document.querySelectorAll('path').forEach(el => { el.classList.remove('visible', 'highlight', 'danger'); });
+            document.querySelectorAll('.fsm-text').forEach(el => { el.classList.remove('visible', 'highlight'); });
+
+            // 4. Apply new classes
+            data.activeNodes.forEach(id => {
+                const el = document.getElementById(id);
+                el.classList.add('visible');
+                // Highlight the state related to the current action
+                if (data.highlightPath && id.includes(data.highlightPath.split('-')[1])) {
+                    el.classList.add('active');
+                }
+            });
+
+            data.activePaths.forEach(id => document.getElementById(id).classList.add('visible'));
+            data.activeTexts.forEach(id => document.getElementById(id).classList.add('visible'));
+
+            if (data.highlightPath) {
+                const path = document.getElementById(data.highlightPath);
+                if (data.isDanger) {
+                    path.classList.add('danger');
+                    // Also make the associated text box look "dangerous"
+                    data.activeTexts.forEach(id => document.getElementById(id).style.borderColor = "#d93025");
+                } else {
+                    path.classList.add('highlight');
+                    data.activeTexts.forEach(id => document.getElementById(id).style.borderColor = "#e9e9e7"); // reset
+                }
+                
+                // Highlight the last text box in the array
+                const lastText = data.activeTexts[data.activeTexts.length - 1];
+                if(lastText) document.getElementById(lastText).classList.add('highlight');
+            }
+        }
+
+        function nextStep() {
+            if (currentStep < steps.length - 1) {
+                currentStep++;
+            } else {
+                currentStep = 0; // Reset
+            }
+            updateUI();
+        }
+
+        function prevStep() {
+            if (currentStep > 0) {
+                currentStep--;
+                updateUI();
+            }
+        }
+
+        // Initialize
+        updateUI();
+
+    </script>
+</body>
+</html>
