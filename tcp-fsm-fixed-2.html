@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TCP Congestion Control — Animated FSM</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #f0f2f8;
+    min-height: 100vh;
+    display: flex; align-items: center; justify-content: center;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    padding: 24px;
+  }
+  #app {
+    width: 100%; max-width: 960px;
+    background: #ffffff;
+    border-radius: 16px; border: 1px solid #dde2ef;
+    padding: 20px 24px 18px;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.07);
+  }
+  .hdr { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+  h1 { font-size: 18px; font-weight: 700; color: #1a237e; letter-spacing: -0.3px; }
+  .btn-row { display: flex; gap: 8px; align-items: center; }
+  button {
+    font-size: 12px; font-weight: 500; padding: 5px 14px; border-radius: 7px;
+    cursor: pointer; border: 1px solid #d4d8e8; background: #fff; color: #6b7280; transition: all .15s;
+  }
+  button:hover:not(:disabled) { background: #f0f2f8; color: #374151; }
+  button:disabled { opacity: .35; cursor: default; }
+  button.go  { background: #e8f5e9; color: #2e7d32; border-color: #a5d6a7; }
+  button.go:hover:not(:disabled) { background: #c8e6c9; }
+  button.rst { background: #fef2f2; color: #dc2626; border-color: #fecaca; }
+  button.rst:hover { background: #fee2e2; }
+  .slbl { font-size: 11px; color: #9ca3af; }
+  #cvs { width: 100%; display: block; }
+  @keyframes draw { from { stroke-dashoffset: var(--L,800); } to { stroke-dashoffset: 0; } }
+  .panel {
+    margin-top: 10px; background: #f8faff; border: 1px solid #dde2ef;
+    border-radius: 10px; padding: 12px 16px; min-height: 64px;
+    transition: border-color .4s, background .4s;
+  }
+  .panel.danger { border-color: #fca5a5; background: #fff5f5; }
+  .panel-title { font-size: 13px; font-weight: 600; color: #111827; margin-bottom: 3px; }
+  .panel-body  { font-size: 12px; color: #6b7280; line-height: 1.65; }
+  .panel-body code {
+    font-family: "SFMono-Regular", Consolas, monospace;
+    font-size: 11px; background: #eef2ff; padding: 1px 5px; border-radius: 4px; color: #1d4ed8;
+  }
+  .panel-body strong { color: #374151; font-weight: 600; }
+  .dots { display: flex; gap: 5px; align-items: center; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: #d8dce8; transition: background .3s, transform .3s; }
+  .dot.done { background: #a7b8d0; }
+  .dot.cur  { background: #1a73e8; transform: scale(1.4); }
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="hdr">
+    <h1>Summary: TCP Congestion Control</h1>
+    <div class="btn-row">
+      <div class="dots" id="dots"></div>
+      <span class="slbl" id="sl">0 / 12</span>
+      <button id="pb" onclick="go(-1)" disabled>← prev</button>
+      <button class="go" id="nb" onclick="go(1)">start →</button>
+    </div>
+  </div>
+
+  <!--
+    COORDINATE PLAN  (viewBox 0 0 960 760)
+    ─────────────────────────────────────────
+    SS  node : cx=220  cy=260  r=72
+    CA  node : cx=680  cy=260  r=72
+    FR  node : cx=450  cy=560  r=65
+
+    LABEL ZONES (no label overlaps a node or another label):
+      [A] top-left     x=10..210   y=50..160    → SS new-ACK self-loop
+      [B] top-center   x=260..590  y=50..130    → (unused — open space)
+      [C] top-right    x=590..950  y=50..160    → CA new-ACK self-loop
+      [D] left         x=10..130   y=170..260   → Init arrow
+      [E] left-mid     x=10..175   y=280..390   → SS dup-ACK self-loop
+      [F] left-low     x=10..195   y=400..510   → SS→FR label
+      [G] center-top   x=270..630  y=170..220   → SS→CA label (above arrow)
+      [H] center-mid   x=270..630  y=275..380   → CA→SS timeout (below arrow)
+      [I] right-mid    x=730..950  y=200..310   → CA dup-ACK self-loop
+      [J] right-low    x=640..950  y=400..510   → CA→FR label
+      [K] center-low   x=280..620  y=610..720   → FR self-loop
+      [L] left-fr      x=10..185   y=520..610   → FR→SS timeout
+      [M] right-fr     x=710..950  y=400..510   → FR→CA new ACK
+      [N] SS timeout   x=10..195   y=290..400   — keep below SS node bottom
+  -->
+
+  <svg id="cvs" viewBox="0 0 960 760"
+       font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif">
+
+    <defs>
+      <marker id="mg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M1 1L9 5L1 9" fill="none" stroke="#aab2c8" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+      </marker>
+      <marker id="mb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M1 1L9 5L1 9" fill="none" stroke="#1a73e8" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+      </marker>
+      <marker id="mr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M1 1L9 5L1 9" fill="none" stroke="#d32f2f" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+      </marker>
+    </defs>
+
+    <!-- ── SKELETON ARROWS ── -->
+    <!-- Init -->
+    <path d="M46,260 L145,260" fill="none" stroke="#aab2c8" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#mg)"/>
+    <!-- SS new-ACK self-loop (top) -->
+    <path d="M183,195 C183,128 257,128 257,195" fill="none" stroke="#aab2c8" stroke-width="1.2" marker-end="url(#mg)"/>
+    <!-- SS dup-ACK self-loop (left) -->
+    <path d="M152,240 C90,210 82,310 148,295" fill="none" stroke="#aab2c8" stroke-width="1.2" marker-end="url(#mg)"/>
+    <!-- SS timeout self-loop (bottom-left) -->
+    <path d="M162,326 C118,385 185,420 222,340" fill="none" stroke="#aab2c8" stroke-width="1.2" marker-end="url(#mg)"/>
+    <!-- SS → CA -->
+    <path d="M295,255 L605,255" fill="none" stroke="#aab2c8" stroke-width="1.2" marker-end="url(#mg)"/>
+    <!-- CA → SS timeout -->
+    <path d="M605,270 L295,270" fill="none" stroke="#aab2c8" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#mg)"/>
+    <!-- CA new-ACK self-loop (top) -->
+    <path d="M643,195 C643,128 717,128 717,195" fill="none" stroke="#aab2c8" stroke-width="1.2" marker-end="url(#mg)"/>
+    <!-- CA dup-ACK self-loop (right) -->
+    <path d="M748,242 C810,210 815,315 750,298" fill="none" stroke="#aab2c8" stroke-width="1.2" marker-end="url(#mg)"/>
+    <!-- SS → FR -->
+    <path d="M200,330 C175,440 310,520 383,540" fill="none" stroke="#aab2c8" stroke-width="1.2" marker-end="url(#mg)"/>
+    <!-- CA → FR -->
+    <path d="M700,330 C725,440 590,520 517,540" fill="none" stroke="#aab2c8" stroke-width="1.2" marker-end="url(#mg)"/>
+    <!-- FR dup-ACK self-loop (bottom) -->
+    <path d="M416,618 C394,678 506,678 484,618" fill="none" stroke="#aab2c8" stroke-width="1.2" marker-end="url(#mg)"/>
+    <!-- FR → CA new ACK -->
+    <path d="M517,540 C620,510 720,420 668,335" fill="none" stroke="#aab2c8" stroke-width="1.2" marker-end="url(#mg)"/>
+    <!-- FR → SS timeout -->
+    <path d="M383,540 C310,520 232,418 224,335" fill="none" stroke="#aab2c8" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#mg)"/>
+
+    <!-- ── ANIMATED ARROWS ── -->
+    <path id="a-init"   d="M46,260 L145,260" fill="none" stroke="#1a73e8" stroke-width="2" stroke-dasharray="5 3" marker-end="url(#mb)" opacity="0"/>
+    <path id="a-ssl"    d="M183,195 C183,128 257,128 257,195" fill="none" stroke="#1a73e8" stroke-width="2" marker-end="url(#mb)" opacity="0"/>
+    <path id="a-ssdup"  d="M152,240 C90,210 82,310 148,295" fill="none" stroke="#1a73e8" stroke-width="2" marker-end="url(#mb)" opacity="0"/>
+    <path id="a-sstout" d="M162,326 C118,385 185,420 222,340" fill="none" stroke="#d32f2f" stroke-width="2" stroke-dasharray="6 3" marker-end="url(#mr)" opacity="0"/>
+    <path id="a-ssca"   d="M295,255 L605,255" fill="none" stroke="#1a73e8" stroke-width="2" marker-end="url(#mb)" opacity="0"/>
+    <path id="a-cass"   d="M605,270 L295,270" fill="none" stroke="#d32f2f" stroke-width="2" stroke-dasharray="6 3" marker-end="url(#mr)" opacity="0"/>
+    <path id="a-cal"    d="M643,195 C643,128 717,128 717,195" fill="none" stroke="#1a73e8" stroke-width="2" marker-end="url(#mb)" opacity="0"/>
+    <path id="a-cadup"  d="M748,242 C810,210 815,315 750,298" fill="none" stroke="#1a73e8" stroke-width="2" marker-end="url(#mb)" opacity="0"/>
+    <path id="a-ssfr"   d="M200,330 C175,440 310,520 383,540" fill="none" stroke="#d32f2f" stroke-width="2" marker-end="url(#mr)" opacity="0"/>
+    <path id="a-cafr"   d="M700,330 C725,440 590,520 517,540" fill="none" stroke="#d32f2f" stroke-width="2" marker-end="url(#mr)" opacity="0"/>
+    <path id="a-frl"    d="M416,618 C394,678 506,678 484,618" fill="none" stroke="#1a73e8" stroke-width="2" marker-end="url(#mb)" opacity="0"/>
+    <path id="a-frca"   d="M517,540 C620,510 720,420 668,335" fill="none" stroke="#1a73e8" stroke-width="2" marker-end="url(#mb)" opacity="0"/>
+    <path id="a-frss"   d="M383,540 C310,520 232,418 224,335" fill="none" stroke="#d32f2f" stroke-width="2" stroke-dasharray="6 3" marker-end="url(#mr)" opacity="0"/>
+
+    <!-- ═══════════════════════════════
+         LABELS — each in its own zone,
+         white bg rect prevents bleed-through
+    ════════════════════════════════ -->
+
+    <!-- [D] INIT — left of SS node, above init arrow -->
+    <g id="lbl-init" opacity="0" style="transition:opacity .35s">
+      <rect x="46" y="148" width="106" height="72" rx="4" fill="white" stroke="#d0d8ee" stroke-width="1"/>
+      <text x="99" y="163" text-anchor="middle" font-size="11" font-weight="700" fill="#444">∧</text>
+      <line x1="52" y1="168" x2="146" y2="168" stroke="#888" stroke-width="0.8"/>
+      <text x="99" y="179" text-anchor="middle" font-size="10" fill="#333">cwnd = 1 MSS</text>
+      <text x="99" y="191" text-anchor="middle" font-size="10" fill="#333">ssthresh = 64 KB</text>
+      <text x="99" y="203" text-anchor="middle" font-size="10" fill="#333">dupACKcount = 0</text>
+    </g>
+
+    <!-- [A] SS new-ACK self-loop — top-left, above the loop arc -->
+    <g id="lbl-ssl" opacity="0" style="transition:opacity .35s">
+      <rect x="100" y="48" width="220" height="72" rx="4" fill="white" stroke="#d0d8ee" stroke-width="1"/>
+      <text x="210" y="63" text-anchor="middle" font-size="11" font-weight="700" fill="#444">new ACK</text>
+      <line x1="106" y1="68" x2="314" y2="68" stroke="#888" stroke-width="0.8"/>
+      <text x="210" y="79" text-anchor="middle" font-size="10" fill="#333">cwnd = cwnd + MSS</text>
+      <text x="210" y="91" text-anchor="middle" font-size="10" fill="#333">dupACKcount = 0</text>
+      <text x="210" y="103" text-anchor="middle" font-size="10" fill="#1565c0" font-style="italic">transmit new segment(s)</text>
+    </g>
+
+    <!-- [E] SS dup-ACK self-loop — far left of node, vertically centred on loop -->
+    <g id="lbl-ssdup" opacity="0" style="transition:opacity .35s">
+      <rect x="4" y="236" width="130" height="42" rx="4" fill="white" stroke="#d0d8ee" stroke-width="1"/>
+      <text x="69" y="251" text-anchor="middle" font-size="11" font-weight="700" fill="#444">duplicate ACK</text>
+      <line x1="10" y1="256" x2="128" y2="256" stroke="#888" stroke-width="0.8"/>
+      <text x="69" y="267" text-anchor="middle" font-size="10" fill="#333">dupACKcount++</text>
+    </g>
+
+    <!-- [N] SS timeout self-loop — below-left of SS node -->
+    <g id="lbl-sstout" opacity="0" style="transition:opacity .35s">
+      <rect x="4" y="368" width="190" height="82" rx="4" fill="white" stroke="#d0d8ee" stroke-width="1"/>
+      <text x="99" y="383" text-anchor="middle" font-size="11" font-weight="700" fill="#c62828">timeout</text>
+      <line x1="10" y1="388" x2="188" y2="388" stroke="#c62828" stroke-width="0.8"/>
+      <text x="99" y="399" text-anchor="middle" font-size="10" fill="#333">ssthresh = cwnd/2</text>
+      <text x="99" y="411" text-anchor="middle" font-size="10" fill="#333">cwnd = 1 MSS</text>
+      <text x="99" y="423" text-anchor="middle" font-size="10" fill="#333">dupACKcount = 0</text>
+      <text x="99" y="438" text-anchor="middle" font-size="10" fill="#1565c0" font-style="italic">retransmit missing segment</text>
+    </g>
+
+    <!-- [G] SS→CA — above the horizontal arrow, centre gap -->
+    <g id="lbl-ssca" opacity="0" style="transition:opacity .35s">
+      <rect x="348" y="226" width="204" height="24" rx="4" fill="white" stroke="#d0d8ee" stroke-width="1"/>
+      <text x="450" y="241" text-anchor="middle" font-size="11" font-weight="700" fill="#444">cwnd ≥ ssthresh</text>
+    </g>
+
+    <!-- [H] CA→SS timeout — below the return arrow, centre gap -->
+    <g id="lbl-cass" opacity="0" style="transition:opacity .35s">
+      <rect x="296" y="282" width="308" height="82" rx="4" fill="white" stroke="#d0d8ee" stroke-width="1"/>
+      <text x="450" y="298" text-anchor="middle" font-size="11" font-weight="700" fill="#c62828">timeout</text>
+      <line x1="302" y1="303" x2="598" y2="303" stroke="#c62828" stroke-width="0.8"/>
+      <text x="450" y="314" text-anchor="middle" font-size="10" fill="#333">ssthresh = cwnd/2</text>
+      <text x="450" y="326" text-anchor="middle" font-size="10" fill="#333">cwnd = 1 MSS</text>
+      <text x="450" y="338" text-anchor="middle" font-size="10" fill="#333">dupACKcount = 0</text>
+      <text x="450" y="352" text-anchor="middle" font-size="10" fill="#1565c0" font-style="italic">retransmit missing segment</text>
+    </g>
+
+    <!-- [C] CA new-ACK self-loop — top-right, above the loop arc -->
+    <g id="lbl-cal" opacity="0" style="transition:opacity .35s">
+      <rect x="546" y="48" width="268" height="72" rx="4" fill="white" stroke="#d0d8ee" stroke-width="1"/>
+      <text x="680" y="63" text-anchor="middle" font-size="11" font-weight="700" fill="#444">new ACK</text>
+      <line x1="552" y1="68" x2="808" y2="68" stroke="#888" stroke-width="0.8"/>
+      <text x="680" y="79" text-anchor="middle" font-size="10" fill="#333">cwnd = cwnd + MSS·(MSS/cwnd)</text>
+      <text x="680" y="91" text-anchor="middle" font-size="10" fill="#333">dupACKcount = 0</text>
+      <text x="680" y="103" text-anchor="middle" font-size="10" fill="#1565c0" font-style="italic">transmit new segment(s)</text>
+    </g>
+
+    <!-- [I] CA dup-ACK self-loop — right of CA node -->
+    <g id="lbl-cadup" opacity="0" style="transition:opacity .35s">
+      <rect x="824" y="236" width="130" height="42" rx="4" fill="white" stroke="#d0d8ee" stroke-width="1"/>
+      <text x="889" y="251" text-anchor="middle" font-size="11" font-weight="700" fill="#444">duplicate ACK</text>
+      <line x1="830" y1="256" x2="948" y2="256" stroke="#888" stroke-width="0.8"/>
+      <text x="889" y="267" text-anchor="middle" font-size="10" fill="#333">dupACKcount++</text>
+    </g>
+
+    <!-- [F] SS→FR — left channel, between SS bottom and FR left -->
+    <g id="lbl-ssfr" opacity="0" style="transition:opacity .35s">
+      <rect x="4" y="428" width="192" height="82" rx="4" fill="white" stroke="#d0d8ee" stroke-width="1"/>
+      <text x="100" y="443" text-anchor="middle" font-size="11" font-weight="700" fill="#c62828">dupACKcount == 3</text>
+      <line x1="10" y1="448" x2="190" y2="448" stroke="#c62828" stroke-width="0.8"/>
+      <text x="100" y="459" text-anchor="middle" font-size="10" fill="#333">ssthresh = cwnd/2</text>
+      <text x="100" y="471" text-anchor="middle" font-size="10" fill="#333">cwnd = ssthresh + 3</text>
+      <text x="100" y="483" text-anchor="middle" font-size="10" fill="#1565c0" font-style="italic">retransmit missing segment</text>
+      <text x="100" y="498" text-anchor="middle" font-size="9" fill="#888">SS → FR</text>
+    </g>
+
+    <!-- [J] CA→FR — right channel, between CA bottom and FR right -->
+    <g id="lbl-cafr" opacity="0" style="transition:opacity .35s">
+      <rect x="764" y="428" width="192" height="82" rx="4" fill="white" stroke="#d0d8ee" stroke-width="1"/>
+      <text x="860" y="443" text-anchor="middle" font-size="11" font-weight="700" fill="#c62828">dupACKcount == 3</text>
+      <line x1="770" y1="448" x2="950" y2="448" stroke="#c62828" stroke-width="0.8"/>
+      <text x="860" y="459" text-anchor="middle" font-size="10" fill="#333">ssthresh = cwnd/2</text>
+      <text x="860" y="471" text-anchor="middle" font-size="10" fill="#333">cwnd = ssthresh + 3</text>
+      <text x="860" y="483" text-anchor="middle" font-size="10" fill="#1565c0" font-style="italic">retransmit missing segment</text>
+      <text x="860" y="498" text-anchor="middle" font-size="9" fill="#888">CA → FR</text>
+    </g>
+
+    <!-- [K] FR self-loop — below FR node -->
+    <g id="lbl-frl" opacity="0" style="transition:opacity .35s">
+      <rect x="294" y="682" width="312" height="54" rx="4" fill="white" stroke="#d0d8ee" stroke-width="1"/>
+      <text x="450" y="697" text-anchor="middle" font-size="11" font-weight="700" fill="#444">duplicate ACK</text>
+      <line x1="300" y1="702" x2="600" y2="702" stroke="#888" stroke-width="0.8"/>
+      <text x="450" y="713" text-anchor="middle" font-size="10" fill="#333">cwnd = cwnd + MSS</text>
+      <text x="450" y="727" text-anchor="middle" font-size="10" fill="#1565c0" font-style="italic">transmit new segment(s), as allowed</text>
+    </g>
+
+    <!-- [M] FR→CA — far right column, fully between FR bottom and CA right edge -->
+    <g id="lbl-frca" opacity="0" style="transition:opacity .35s">
+      <rect x="764" y="350" width="192" height="62" rx="4" fill="white" stroke="#d0d8ee" stroke-width="1"/>
+      <text x="860" y="366" text-anchor="middle" font-size="11" font-weight="700" fill="#444">New ACK</text>
+      <line x1="770" y1="371" x2="950" y2="371" stroke="#888" stroke-width="0.8"/>
+      <text x="860" y="382" text-anchor="middle" font-size="10" fill="#333">cwnd = ssthresh</text>
+      <text x="860" y="394" text-anchor="middle" font-size="10" fill="#333">dupACKcount = 0</text>
+      <text x="860" y="406" text-anchor="middle" font-size="9" fill="#888">FR → CA</text>
+    </g>
+
+    <!-- [L] FR→SS timeout — left of FR→SS arc -->
+    <g id="lbl-frss" opacity="0" style="transition:opacity .35s">
+      <rect x="4" y="536" width="192" height="82" rx="4" fill="white" stroke="#d0d8ee" stroke-width="1"/>
+      <text x="100" y="551" text-anchor="middle" font-size="11" font-weight="700" fill="#c62828">timeout</text>
+      <line x1="10" y1="556" x2="190" y2="556" stroke="#c62828" stroke-width="0.8"/>
+      <text x="100" y="567" text-anchor="middle" font-size="10" fill="#333">ssthresh = cwnd/2</text>
+      <text x="100" y="579" text-anchor="middle" font-size="10" fill="#333">cwnd = 1 MSS</text>
+      <text x="100" y="591" text-anchor="middle" font-size="10" fill="#333">dupACKcount = 0</text>
+      <text x="100" y="603" text-anchor="middle" font-size="10" fill="#1565c0" font-style="italic">retransmit missing segment</text>
+      <text x="100" y="611" text-anchor="middle" font-size="9" fill="#888">FR → SS</text>
+    </g>
+
+    <!-- ═══════════════════════════
+         STATE NODES  (drawn last so they always appear on top)
+    ════════════════════════════ -->
+
+    <!-- Slow Start  cx=220 cy=260 r=72 -->
+    <g id="n-ss" opacity="0" style="transition:opacity .5s">
+      <circle id="rc-ss" cx="220" cy="260" r="80" fill="none" stroke="#1a73e8" stroke-width="2" stroke-opacity="0" style="transition:stroke-opacity .4s"/>
+      <circle cx="220" cy="260" r="72" fill="#00bfa5" stroke="#00897b" stroke-width="2"/>
+      <text x="220" y="251" text-anchor="middle" dominant-baseline="central" font-size="18" font-weight="700" fill="#fff">slow</text>
+      <text x="220" y="271" text-anchor="middle" dominant-baseline="central" font-size="18" font-weight="700" fill="#fff">start</text>
+    </g>
+
+    <!-- Congestion Avoidance  cx=680 cy=260 r=72 -->
+    <g id="n-ca" opacity="0" style="transition:opacity .5s">
+      <circle id="rc-ca" cx="680" cy="260" r="80" fill="none" stroke="#1a73e8" stroke-width="2" stroke-opacity="0" style="transition:stroke-opacity .4s"/>
+      <circle cx="680" cy="260" r="72" fill="#00bfa5" stroke="#00897b" stroke-width="2"/>
+      <text x="680" y="248" text-anchor="middle" dominant-baseline="central" font-size="15" font-weight="700" fill="#fff">congestion</text>
+      <text x="680" y="270" text-anchor="middle" dominant-baseline="central" font-size="15" font-weight="700" fill="#fff">avoidance</text>
+    </g>
+
+    <!-- Fast Recovery  cx=450 cy=560 r=65 -->
+    <g id="n-fr" opacity="0" style="transition:opacity .5s">
+      <circle id="rc-fr" cx="450" cy="560" r="73" fill="none" stroke="#1a73e8" stroke-width="2" stroke-opacity="0" style="transition:stroke-opacity .4s"/>
+      <circle cx="450" cy="560" r="65" fill="#00bfa5" stroke="#00897b" stroke-width="2"/>
+      <text x="450" y="549" text-anchor="middle" dominant-baseline="central" font-size="16" font-weight="700" fill="#fff">fast</text>
+      <text x="450" y="569" text-anchor="middle" dominant-baseline="central" font-size="16" font-weight="700" fill="#fff">recovery</text>
+    </g>
+
+  </svg>
+
+  <div class="panel" id="panel">
+    <div class="panel-title" id="ptitle">TCP Congestion Control FSM</div>
+    <div class="panel-body"  id="pbody">Click <strong>start →</strong> to step through each state and transition. Use <kbd>→</kbd> / <kbd>←</kbd> arrow keys too.</div>
+  </div>
+</div>
+
+<script>
+const LEN = {
+  "a-init":  100,
+  "a-ssl":   195,
+  "a-ssdup": 185,
+  "a-sstout":190,
+  "a-ssca":  315,
+  "a-cass":  315,
+  "a-cal":   195,
+  "a-cadup": 185,
+  "a-ssfr":  320,
+  "a-cafr":  320,
+  "a-frl":   205,
+  "a-frca":  320,
+  "a-frss":  320,
+};
+
+const ALL_NODES  = ["n-ss","n-ca","n-fr"];
+const ALL_ARROWS = Object.keys(LEN);
+const ALL_LABELS = [
+  "lbl-init","lbl-ssl","lbl-ssdup","lbl-sstout",
+  "lbl-ssca","lbl-cass",
+  "lbl-cal","lbl-cadup",
+  "lbl-ssfr","lbl-cafr",
+  "lbl-frl","lbl-frca","lbl-frss",
+];
+
+const steps = [
+  { title:"TCP Congestion Control FSM",
+    body:"Click <strong>start →</strong> to walk through each state and transition. Arrow keys work too.",
+    nodes:[], arrows:[], labels:[], hot:null, hotArr:null, danger:false },
+
+  { title:"1. Connection opens — Slow Start",
+    body:"A new connection initialises: <code>cwnd = 1 MSS</code>, <code>ssthresh = 64 KB</code>, <code>dupACKcount = 0</code>. TCP enters <strong>Slow Start</strong>.",
+    nodes:["n-ss"], arrows:["a-init"], labels:["lbl-init"],
+    hot:"n-ss", hotArr:"a-init", danger:false },
+
+  { title:"2. New ACK in Slow Start — exponential growth",
+    body:"Each ACK: <code>cwnd = cwnd + MSS</code>, <code>dupACKcount = 0</code>. The window <strong>doubles every RTT</strong>.",
+    nodes:["n-ss"], arrows:["a-init","a-ssl"], labels:["lbl-init","lbl-ssl"],
+    hot:"n-ss", hotArr:"a-ssl", danger:false },
+
+  { title:"3. Duplicate ACK in Slow Start",
+    body:"A duplicate ACK increments <code>dupACKcount</code> but does not change cwnd yet.",
+    nodes:["n-ss"], arrows:["a-ssdup"], labels:["lbl-ssdup"],
+    hot:"n-ss", hotArr:"a-ssdup", danger:false },
+
+  { title:"4. Timeout in Slow Start — stays in Slow Start",
+    body:"Timer fires: <code>ssthresh = cwnd/2</code>, <code>cwnd = 1 MSS</code>, retransmit. TCP loops back within Slow Start.",
+    nodes:["n-ss"], arrows:["a-sstout"], labels:["lbl-sstout"],
+    hot:"n-ss", hotArr:"a-sstout", danger:true },
+
+  { title:"5. cwnd ≥ ssthresh → Congestion Avoidance",
+    body:"Threshold reached — exponential growth stops. TCP enters <strong>Congestion Avoidance</strong> for linear growth.",
+    nodes:["n-ss","n-ca"], arrows:["a-ssl","a-ssca"], labels:["lbl-ssl","lbl-ssca"],
+    hot:"n-ca", hotArr:"a-ssca", danger:false },
+
+  { title:"6. New ACK in Congestion Avoidance — additive increase",
+    body:"Each ACK: <code>cwnd += MSS·(MSS/cwnd)</code> ≈ <strong>+1 MSS per RTT</strong>. Classic AIMD sawtooth.",
+    nodes:["n-ss","n-ca"], arrows:["a-ssca","a-cal"], labels:["lbl-ssca","lbl-cal"],
+    hot:"n-ca", hotArr:"a-cal", danger:false },
+
+  { title:"7. Duplicate ACK in Congestion Avoidance",
+    body:"A dup ACK increments <code>dupACKcount</code>. TCP waits — a few dups can occur from reordering.",
+    nodes:["n-ss","n-ca"], arrows:["a-cadup"], labels:["lbl-cadup"],
+    hot:"n-ca", hotArr:"a-cadup", danger:false },
+
+  { title:"8. Timeout in Congestion Avoidance → Slow Start",
+    body:"Timer fires: <code>ssthresh = cwnd/2</code>, <code>cwnd = 1 MSS</code>. TCP falls all the way back to <strong>Slow Start</strong>.",
+    nodes:["n-ss","n-ca"], arrows:["a-cass"], labels:["lbl-cass"],
+    hot:"n-ss", hotArr:"a-cass", danger:true },
+
+  { title:"9. 3 Duplicate ACKs → Fast Recovery",
+    body:"Three dup ACKs detected. <code>ssthresh = cwnd/2</code>, <code>cwnd = ssthresh+3</code>, retransmit. Enter <strong>Fast Recovery</strong>.",
+    nodes:["n-ss","n-ca","n-fr"], arrows:["a-cal","a-cafr","a-ssfr"], labels:["lbl-cal","lbl-cafr","lbl-ssfr"],
+    hot:"n-fr", hotArr:"a-cafr", danger:true },
+
+  { title:"10. Duplicate ACK in Fast Recovery — window inflation",
+    body:"Each extra dup ACK: <code>cwnd = cwnd + MSS</code>. TCP inflates to keep sending while awaiting retransmission confirmation.",
+    nodes:["n-ss","n-ca","n-fr"], arrows:["a-cafr","a-ssfr","a-frl"], labels:["lbl-cafr","lbl-ssfr","lbl-frl"],
+    hot:"n-fr", hotArr:"a-frl", danger:false },
+
+  { title:"11. New ACK in Fast Recovery → Congestion Avoidance",
+    body:"Lost segment confirmed: <code>cwnd = ssthresh</code>, <code>dupACKcount = 0</code>. Recovery complete — back to <strong>Congestion Avoidance</strong>.",
+    nodes:["n-ss","n-ca","n-fr"], arrows:["a-frl","a-frca","a-cal"], labels:["lbl-frca","lbl-cal"],
+    hot:"n-ca", hotArr:"a-frca", danger:false },
+
+  { title:"12. Timeout in Fast Recovery → Slow Start",
+    body:"Even in Fast Recovery a timeout is severe: <code>ssthresh = cwnd/2</code>, <code>cwnd = 1 MSS</code>. Falls back to <strong>Slow Start</strong>.",
+    nodes:["n-ss","n-ca","n-fr"], arrows:["a-frss"], labels:["lbl-frss"],
+    hot:"n-ss", hotArr:"a-frss", danger:true },
+];
+
+let cur = 0;
+const $ = id => document.getElementById(id);
+
+function animArr(id, danger) {
+  const p = $(id); if (!p) return;
+  const L = LEN[id] || 300, total = L + 16;
+  p.style.stroke = danger ? "#d32f2f" : "#1a73e8";
+  p.setAttribute("marker-end", danger ? "url(#mr)" : "url(#mb)");
+  p.setAttribute("stroke-dasharray", String(total));
+  p.style.setProperty("--L", String(total));
+  p.style.animation = "none";
+  p.style.strokeDashoffset = String(total);
+  p.style.opacity = "1";
+  void p.getBoundingClientRect();
+  p.style.animation = "draw .6s cubic-bezier(.4,0,.2,1) forwards";
+}
+
+function styleNode(id, isHot, danger) {
+  const g = $(id); if (!g) return;
+  g.style.opacity = "1";
+  const circle = g.querySelector("circle:not([id])");
+  const ring   = g.querySelector("circle[id]");
+  const texts  = g.querySelectorAll("text");
+  if (isHot) {
+    circle.setAttribute("fill",   danger ? "#e53935" : "#00897b");
+    circle.setAttribute("stroke", danger ? "#b71c1c" : "#004d40");
+    circle.setAttribute("stroke-width", "3");
+    if (ring) { ring.setAttribute("stroke", danger ? "#ef5350" : "#00bfa5"); ring.setAttribute("stroke-opacity","0.45"); }
+    texts.forEach(t => t.setAttribute("fill", "#fff"));
+  } else {
+    circle.setAttribute("fill",   "#80cbc4");
+    circle.setAttribute("stroke", "#4db6ac");
+    circle.setAttribute("stroke-width", "2");
+    if (ring) ring.setAttribute("stroke-opacity","0");
+    texts.forEach(t => t.setAttribute("fill", "#e0f2f1"));
+  }
+}
+
+function render() {
+  const s = steps[cur];
+  ALL_NODES.forEach(id  => { const g=$(id); if(g) g.style.opacity="0"; });
+  ALL_ARROWS.forEach(id => { const a=$(id); if(!a) return; a.style.opacity="0"; a.style.animation="none"; });
+  ALL_LABELS.forEach(id => { const g=$(id); if(g) g.style.opacity="0"; });
+
+  s.nodes.forEach(id => styleNode(id, id===s.hot, s.danger && id===s.hot));
+  s.arrows.forEach((id, i) => {
+    if (id === s.hotArr) setTimeout(() => animArr(id, s.danger), i * 80);
+    else { const a=$(id); if(a){ a.style.opacity="0.4"; a.style.animation="none"; } }
+  });
+  s.labels.forEach(id => { const g=$(id); if(g) g.style.opacity="1"; });
+
+  $("ptitle").textContent = s.title;
+  $("pbody").innerHTML    = s.body;
+  $("panel").classList.toggle("danger", !!s.danger);
+  $("pb").disabled = (cur === 0);
+  const nb = $("nb");
+  nb.textContent = cur === steps.length-1 ? "↺ restart" : cur === 0 ? "start →" : "next →";
+  nb.className   = cur === steps.length-1 ? "rst" : "go";
+  $("sl").textContent = `${cur} / ${steps.length-1}`;
+
+  const dc = $("dots"); dc.innerHTML = "";
+  steps.forEach((_,i) => {
+    const d = document.createElement("div");
+    d.className = "dot"+(i===cur?" cur":i<cur?" done":"");
+    dc.appendChild(d);
+  });
+}
+
+function go(dir) {
+  if (dir===1) cur = cur < steps.length-1 ? cur+1 : 0;
+  else if (cur>0) cur--;
+  render();
+}
+
+document.addEventListener("keydown", e => {
+  if (e.key==="ArrowRight"||e.key===" ") { e.preventDefault(); go(1); }
+  if (e.key==="ArrowLeft") { e.preventDefault(); go(-1); }
+});
+
+render();
+</script>
+</body>
+</html>
